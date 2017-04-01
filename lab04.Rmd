@@ -1,0 +1,120 @@
+---
+title: "lab04"
+output: html_document
+author: "Elyervesson de Souza Pereira 112210644"
+---
+
+```{r Importando as bibliotecas, include=FALSE}
+library(recommenderlab)
+library(dplyr)
+library(reshape2)
+```
+
+```{r Leitura dos dados, include=FALSE}
+setwd("C:/Users/elyer/Documents/")
+
+train <- read.csv("lab4_part1_train_data.csv", encoding = "UTF-8")
+test <- read.csv("lab4_part1_test_data.csv", encoding = "UTF-8")
+```
+
+```{r Preparação dos dados 01, include=FALSE}
+train <- na.omit(train)
+train <- subset(train, select=c(MAT_NOVA_MATRICULA, periodo_relativo, NOME_DISCIPLINA, PERIODO_DISCIPLINA, MAT_MEDIA_FINAL))
+names(train) <- c("matricula", "periodo_r", "disciplina", "periodo_d", "media")
+train <- train %>% filter(periodo_d<=4)
+
+test <- na.omit(test)
+test <- subset(test, select=c(MAT_NOVA_MATRICULA, periodo_relativo, NOME_DISCIPLINA, PERIODO_DISCIPLINA, MAT_MEDIA_FINAL))
+names(test) <- c("matricula", "periodo_r", "disciplina", "periodo_d", "media")
+test <- test %>% filter(periodo_d<=4)
+```
+
+```{r Preparação dos dados 02, include=FALSE}
+# Formatando treino
+
+train_wide <- dcast(train, matricula ~ disciplina, value.var = "media", max)
+train_wide[train_wide == "-Inf"] = NA 
+
+train_wide$matricula <- seq.int(nrow(train_wide))
+train_wide <- as.matrix(train_wide) # Convert it as a matrix
+# train_wide <- sapply(data.frame(train_wide),as.numeric)
+train_wide <- as(train_wide, "realRatingMatrix") # Convert it as a realRatingMatrix
+
+# Formatando teste
+
+data <- test # Copia dos dados com as medias
+test <- within(test, media[periodo_r==4] <- NA) # Apagando media do 4° periodo
+test_wide <- dcast(test, matricula ~ disciplina, value.var = "media", max)
+test_wide[test_wide == "-Inf"] = -1
+
+test_wide$matricula <- seq.int(nrow(test_wide))
+test_wide <- as.matrix(test_wide) # Convert it as a matrix
+# test_wide <- sapply(data.frame(test_wide),as.numeric)
+test_wide <- as(test_wide, "realRatingMatrix") # Convert it as a realRatingMatrix
+```
+
+- Criação do recomender baseado nos dados fornecidos, foi utilizado o metodo User-Based-Collaborative-Filtering 
+```{r Criação do recomender baseado no metodo UBCF, echo=FALSE}
+recomend <- Recommender(train_wide[1:nrow(train_wide)], method="UBCF", param=list(normalize = "z-score",method="pearson",nn=50))
+result <- predict(recomend, test_wide, type="ratings", minRating=0.1)
+
+result.aluno.54 <- predict(recomend, test_wide[54,], type="ratings", minRating=0)
+result.aluno.25 <- predict(recomend, test_wide[25,], type="ratings", minRating=0)
+result.aluno.32 <- predict(recomend, test_wide[32,], type="ratings", minRating=0)
+
+print("Recomender")
+print(recomend)
+
+print("Predict")
+print(result)
+```
+
+- Exibição dos resultados
+```{r Exibição da predções feitas, echo=FALSE}
+# Exibição dos resultados              
+result <- as(result, "matrix")
+result <- data.frame(result)
+
+print("Resultados de um aluno aleatorio")
+print(as(result.aluno.54, "matrix"))
+print("Nenhuma predição feita")
+print(as(result.aluno.25, "matrix"))
+print("Resultados de um aluno aleatorio")
+print(as(result.aluno.32, "matrix"))
+```
+- Como podemos ver, existem varias colunas com NAs, quando esse valor é mostrado significa que nenhum valor foi predito para aquela disciplina, isso pode ocorrer quando:
+-- Aluno ja havia pagado aquela disciplina, assim não faz sentido predize-la
+-- Aluno não tinha nenhum outro aluno similar, assim não fica possivel fazer a predição
+-- falta de dados (NAs em nomes de disciplinas e etc)
+
+- Das 54 linhas de predição, 6 (11%) não foram concluidas com sucesso (dentre elas esta a n 25 mostrada a cima)
+```{r Preparação dos dados 03, include=FALSE}
+# RMSE
+data_wide <- dcast(data, matricula ~ disciplina, value.var = "media", max)
+data_wide[data_wide == "-Inf"] = NA
+
+result$matricula <- data_wide[,'matricula']
+result <- melt(result)
+names(result) <- c("matricula", "disciplina", "media")
+
+data$disciplina <- gsub(" ", ".", data$disciplina)
+
+result <- merge(result, data, by=c("matricula", "disciplina"))
+result <- na.omit(result)
+result <- subset(result, select=c(matricula, media.x, media.y))
+result <- result %>% mutate(media.x= ifelse(media.x < 0, 0, media.x))
+result$result <- (result$media.y - abs(result$media.x))^2
+```
+
+- Apos a obtenção dos resultados foi calculado o valor do rmse nota por nota e o resultado é mostrado a seguir
+```{r Exibição do valor do rmse calculado, echo=FALSE}
+# Exibição dos resultados  
+print("Valor")
+rmse <- sqrt(sum(result$result)/nrow(result))
+print(rmse)
+
+```
+
+- Foram feitos testes com varios parametros diferentes (pearson, Jaccard e Cosine), normalizando com z-score e center, diferentes valores para 'k' (3, 5, 10, 20, 50, 60, 100) e diferentes valores para o minRating, porem, os valores que obtiveram os melhores resultados foram:
+
+- normalize = "z-score", method="pearson", nn=50
